@@ -5,7 +5,7 @@ import java.io.File
 import xml.NodeSeq
 
 // cheating for now
-import sbt.ScalaInstance
+import sbt.{Configuration, ScalaInstance}
 
 class IdeaProjectDomain
 
@@ -17,12 +17,14 @@ object IdeaLibrary {
   case object ProvidedScope extends Scope(Some("PROVIDED"))
 
   object Scope {
-    def apply(conf: String): Scope = {
+    def apply(conf: String, extraCompileConfigurations: Seq[Configuration], extraTestConfigurations: Seq[Configuration]): Scope = {
       conf match {
         case "compile" => CompileScope
         case "runtime" => RuntimeScope
         case "test" => TestScope
         case "provided" => ProvidedScope
+        case name if extraCompileConfigurations.exists(config => config.name == name) => CompileScope
+        case name if extraTestConfigurations.exists(config => config.name == name) => TestScope
         case _ => CompileScope
       }
     }

@@ -8,7 +8,7 @@ object SbtIdeaBuild extends Build with BuildExtra {
     sbtPlugin := true,
     organization := "com.github.mpeltonen",
     name := "sbt-idea",
-    version := "1.7.0-SNAPSHOT",
+    version := "1.7.1-SNAPSHOT",
     sbtVersion in Global := "0.13.2",
     scalaVersion in Global := "2.10.3",
     publishTo <<= version { (v: String) =>
@@ -18,6 +18,7 @@ object SbtIdeaBuild extends Build with BuildExtra {
     },
     publishMavenStyle := true,
     publishArtifact in Test := false,
+    credentials += Credentials(Path.userHome / ".ivy2/.credentials"),
     pomIncludeRepository := (_ => false),
     pomExtra := extraPom,
     resolvers ++= Seq(

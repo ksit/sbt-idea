@@ -17,9 +17,11 @@ object SbtIdeaPlugin extends Plugin {
                                                      "The package prefix for source directories.")
   val ideaSourcesClassifiers = SettingKey[Seq[String]]("idea-sources-classifiers")
   val ideaJavadocsClassifiers = SettingKey[Seq[String]]("idea-javadocs-classifiers")
+  val ideaOutputFolder = SettingKey[File]("idea-output-folder", "An alternate output path to use")
   val ideaExcludeFolders = SettingKey[Seq[String]]("idea-exclude-folders")
   val ideaExtraFacets = SettingKey[NodeSeq]("idea-extra-facets")
   val ideaIncludeScalaFacet = SettingKey[Boolean]("idea-include-scala-facet")
+  val ideaExtraCompileConfigurations = SettingKey[Seq[Configuration]]("idea-extra-compile-configurations","Extra configurations to be included in compile sources")
   val ideaExtraTestConfigurations = SettingKey[Seq[Configuration]]("idea-extra-test-configurations","Extra configurations to be included in test sources")
 
   override lazy val settings = Seq(
@@ -32,6 +34,7 @@ object SbtIdeaPlugin extends Plugin {
     ideaExcludeFolders <<= ideaExcludeFolders ?? Nil,
     ideaExtraFacets <<= ideaExtraFacets ?? NodeSeq.Empty,
     ideaIncludeScalaFacet <<= ideaIncludeScalaFacet ?? true,
+    ideaExtraCompileConfigurations <<= ideaExtraCompileConfigurations ?? Nil,
     ideaExtraTestConfigurations <<= ideaExtraTestConfigurations ?? Seq()
   )
 
@@ -127,7 +130,7 @@ object SbtIdeaPlugin extends Plugin {
     val sbtModuleSourceFiles: Seq[File] = {
       val sbtLibs: Seq[IdeaLibrary] = if (args.contains(SbtClassifiers)) {
         EvaluateTask(buildStruct, Keys.updateSbtClassifiers, state, projectList.head._1).map(_._2) match {
-          case Some(Value(report)) => extractLibraries(report)
+          case Some(Value(report)) => extractLibraries(report, Nil, Nil)
           case _ => Seq()
         }
       } else Seq()
@@ -195,25 +198,39 @@ object SbtIdeaPlugin extends Plugin {
       settings.settingWithDefault(Keys.unmanagedResourceDirectories in config, Nil)
     }
     def directoriesFor(config: Configuration) = {
+      val outputDir =
+        settings.optionalSetting(ideaOutputFolder in config).
+          getOrElse(settings.setting(Keys.classDirectory in config, "Missing class directory!"))
       Directories(
         sourceDirectoriesFor(config),
         resourceDirectoriesFor(config),
-        settings.setting(Keys.classDirectory in config, "Missing class directory!"))
+        outputDir)
     }
-    val compileDirectories: Directories = directoriesFor(Configurations.Compile)
 
+    val extraCompileConfigurations = settings.setting(ideaExtraCompileConfigurations, "Missing extra test configuration")
+    def appendExtraCompileDirectories(directories: Directories) = {
+      extraCompileConfigurations.foldLeft(directories)((dirs,conf) =>
+        dirs.addSrc(sourceDirectoriesFor(conf)).addRes(resourceDirectoriesFor(conf))
+      )
+    }
+    val compileDirectories: Directories = appendExtraCompileDirectories(directoriesFor(Configurations.Compile))
+
+    val extraTestConfigurations = Seq(Configurations.IntegrationTest) ++ settings.setting(ideaExtraTestConfigurations, "Missing extra test configuration")
     def appendExtraTestDirectories(directories: Directories) = {
-      val extraConfigurations = (Seq(Configurations.IntegrationTest) ++ settings.setting(ideaExtraTestConfigurations, "Missing extra test configuration"))
-      extraConfigurations.foldLeft(directories)((dirs,conf) =>
+      extraTestConfigurations.foldLeft(directories)((dirs,conf) =>
         dirs.addSrc(sourceDirectoriesFor(conf)).addRes(resourceDirectoriesFor(conf))
       )
     }
     val testDirectories: Directories = appendExtraTestDirectories(directoriesFor(Configurations.Test))
+
     val librariesExtractor = new SbtIdeaModuleMapping.LibrariesExtractor(buildStruct, state, projectRef, scalaInstance,
       withClassifiers = if (args.contains(NoClassifiers)) None else {
         Some((settings.setting(ideaSourcesClassifiers, "Missing idea-sources-classifiers"), settings.setting(ideaJavadocsClassifiers, "Missing idea-javadocs-classifiers")))
-      }
+      },
+      extraCompileConfigurations,
+      extraTestConfigurations
     )
+
     val basePackage = settings.setting(ideaBasePackage, "missing IDEA base package")
     val packagePrefix = settings.setting(ideaPackagePrefix, "missing package prefix")
     val extraFacets = settings.settingWithDefault(ideaExtraFacets, NodeSeq.Empty)
@@ -227,7 +244,7 @@ object SbtIdeaPlugin extends Plugin {
     val dependencyProjects = {
       val dependencies = project.dependencies.collect {
         case p if isAggregate(p.project.project) =>
-          DependencyProject(p.project.project, IdeaLibrary.Scope(p.configuration getOrElse "compile"))
+          DependencyProject(p.project.project, IdeaLibrary.Scope(p.configuration getOrElse "compile", extraCompileConfigurations, extraTestConfigurations))
       }
       val aggregates = project.aggregate.collect {
         case p if isAggregate(p.project) && dependencies.forall(_.name != p.project) =>
